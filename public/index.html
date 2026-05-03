@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Uniswap Trading Agent Dashboard</title>
+    <style>
+      :root {
+        --bg: #0b1020;
+        --card: #151c33;
+        --muted: #8ea1c0;
+        --text: #e8eeff;
+        --accent: #6fa8ff;
+        --ok: #4ee39c;
+        --err: #ff6d7a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: radial-gradient(circle at 10% 10%, #1b2852 0%, var(--bg) 45%);
+        color: var(--text);
+      }
+      .wrap {
+        max-width: 1100px;
+        margin: 24px auto;
+        padding: 0 16px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+      }
+      p {
+        margin: 0 0 16px;
+        color: var(--muted);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid #22305f;
+        border-radius: 14px;
+        padding: 16px;
+      }
+      .card h2 {
+        margin: 0 0 12px;
+        font-size: 18px;
+      }
+      label {
+        display: block;
+        margin-top: 10px;
+        margin-bottom: 4px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      input,
+      select,
+      button,
+      textarea {
+        width: 100%;
+        border: 1px solid #2a3c73;
+        background: #0f1730;
+        color: var(--text);
+        border-radius: 10px;
+        padding: 10px;
+      }
+      button {
+        margin-top: 12px;
+        background: linear-gradient(90deg, #5d8dff, #72a9ff);
+        color: #06102d;
+        border: none;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      button:hover {
+        filter: brightness(1.08);
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .status {
+        font-weight: 700;
+      }
+      .ok {
+        color: var(--ok);
+      }
+      .err {
+        color: var(--err);
+      }
+      pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: #0a1126;
+        border: 1px solid #22305f;
+        border-radius: 10px;
+        padding: 12px;
+        min-height: 140px;
+        max-height: 420px;
+        overflow: auto;
+        margin: 0;
+      }
+      @media (max-width: 900px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Uniswap Trading Dashboard</h1>
+      <p>Local UI for quote, trade, and DCA strategy using your trading agent.</p>
+      <div class="grid">
+        <section class="card">
+          <h2>Trade Inputs</h2>
+          <div class="row">
+            <div>
+              <label>Chain</label>
+              <select id="chain">
+                <option value="mainnet">mainnet</option>
+                <option value="base">base</option>
+                <option value="arbitrum">arbitrum</option>
+              </select>
+            </div>
+            <div>
+              <label>Type</label>
+              <select id="type">
+                <option value="EXACT_INPUT">EXACT_INPUT</option>
+                <option value="EXACT_OUTPUT">EXACT_OUTPUT</option>
+              </select>
+            </div>
+          </div>
+
+          <label>Token In</label>
+          <input id="tokenIn" value="0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" />
+
+          <label>Token Out</label>
+          <input id="tokenOut" value="0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2" />
+
+          <div class="row">
+            <div>
+              <label>Amount Human (e.g. 1.0)</label>
+              <input id="amountHuman" value="1.0" />
+            </div>
+            <div>
+              <label>Slippage %</label>
+              <input id="slippageTolerance" value="0.5" />
+            </div>
+          </div>
+
+          <div class="row">
+            <div>
+              <label>Deadline Seconds</label>
+              <input id="deadlineSeconds" value="180" />
+            </div>
+            <div>
+              <label>Runs (DCA)</label>
+              <input id="runs" value="2" />
+            </div>
+          </div>
+          <label>Interval Ms (DCA)</label>
+          <input id="intervalMs" value="10000" />
+
+          <button id="btnHealth">Check Health</button>
+          <button id="btnQuote">Get Quote</button>
+          <button id="btnTrade">Execute Trade</button>
+          <button id="btnDca">Run DCA Strategy</button>
+        </section>
+
+        <section class="card">
+          <h2>Response</h2>
+          <p class="status" id="status">Idle</p>
+          <pre id="output">{}</pre>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      const output = document.getElementById("output");
+      const statusEl = document.getElementById("status");
+
+      function setStatus(text, ok) {
+        statusEl.textContent = text;
+        statusEl.className = `status ${ok ? "ok" : "err"}`;
+      }
+
+      function getPayload() {
+        return {
+          chain: document.getElementById("chain").value,
+          type: document.getElementById("type").value,
+          tokenIn: document.getElementById("tokenIn").value.trim(),
+          tokenOut: document.getElementById("tokenOut").value.trim(),
+          amountHuman: document.getElementById("amountHuman").value.trim(),
+          slippageTolerance: Number(document.getElementById("slippageTolerance").value),
+          deadlineSeconds: Number(document.getElementById("deadlineSeconds").value),
+          runs: Number(document.getElementById("runs").value),
+          intervalMs: Number(document.getElementById("intervalMs").value),
+        };
+      }
+
+      async function callApi(method, path, body) {
+        setStatus(`${method} ${path}...`, true);
+        try {
+          const res = await fetch(path, {
+            method,
+            headers: { "Content-Type": "application/json" },
+            body: body ? JSON.stringify(body) : undefined,
+          });
+          const json = await res.json();
+          output.textContent = JSON.stringify(json, null, 2);
+          if (!res.ok || json.ok === false) {
+            setStatus(`Error (${res.status})`, false);
+          } else {
+            setStatus(`Success (${res.status})`, true);
+          }
+        } catch (err) {
+          output.textContent = JSON.stringify({ error: err.message }, null, 2);
+          setStatus("Network error", false);
+        }
+      }
+
+      document.getElementById("btnHealth").addEventListener("click", () => callApi("GET", "/health"));
+      document.getElementById("btnQuote").addEventListener("click", () => callApi("POST", "/quote", getPayload()));
+      document.getElementById("btnTrade").addEventListener("click", () => callApi("POST", "/trade", getPayload()));
+      document.getElementById("btnDca").addEventListener("click", () => callApi("POST", "/strategy/dca", getPayload()));
+    </script>
+  </body>
+</html>
