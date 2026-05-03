@@ -39,13 +39,36 @@ npm install
 npm start
 ```
 
+## Deploy on Vercel
+
+This project is now Vercel-ready using `api/index.js` + `vercel.json`.
+
+1. Push repo to GitHub.
+2. Import project in Vercel.
+3. Root directory: project root (`uniswap trading agent`).
+4. Add environment variables in Vercel:
+   - `UNISWAP_API_KEY`
+   - `UNISWAP_API_BASE_URL`
+   - `RPC_URL`
+   - `WALLET_PRIVATE_KEY`
+   - `CHAIN_PRESET`
+5. Deploy.
+
+All routes (`/`, `/health`, `/quote`, `/trade`, `/strategy/dca`) are served by the Node function.
+
 ## Endpoints
 
 ### Health
 
 `GET /health`
 
-Returns wallet address, native coin balance, and network info.
+Returns wallet mode/status, native coin balance (if configured), network info, and database path.
+
+### History
+
+`GET /history?limit=50`
+
+Returns latest quote/trade/DCA records stored in SQLite.
 
 ### Quote
 
@@ -105,3 +128,4 @@ Example:
 - This trades real money if your wallet has funds.
 - Start with very small amounts.
 - Keep `.env` private and never commit private key or API key.
+- Local database file is stored at `data/trading-agent.db`.

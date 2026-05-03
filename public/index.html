@@ -172,6 +172,7 @@
           <button id="btnQuote">Get Quote</button>
           <button id="btnTrade">Execute Trade</button>
           <button id="btnDca">Run DCA Strategy</button>
+          <button id="btnHistory">View History</button>
         </section>
 
         <section class="card">
@@ -230,6 +231,7 @@
       document.getElementById("btnQuote").addEventListener("click", () => callApi("POST", "/quote", getPayload()));
       document.getElementById("btnTrade").addEventListener("click", () => callApi("POST", "/trade", getPayload()));
       document.getElementById("btnDca").addEventListener("click", () => callApi("POST", "/strategy/dca", getPayload()));
+      document.getElementById("btnHistory").addEventListener("click", () => callApi("GET", "/history?limit=50"));
     </script>
   </body>
 </html>

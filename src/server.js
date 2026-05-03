@@ -3,6 +3,7 @@ const axios = require("axios");
 const dotenv = require("dotenv");
 const { ethers } = require("ethers");
 const { z } = require("zod");
+const { initDb, logTradeEvent, getTradeHistory, dbPath } = require("./db");
 
 dotenv.config();
 
@@ -136,6 +137,7 @@ app.get("/health", async (_req, res) => {
         ok: true,
         mode: "limited",
         message: "Server running. Add RPC_URL + WALLET_PRIVATE_KEY for live trading.",
+        databasePath: dbPath,
       });
     }
     const balance = await provider.getBalance(wallet.address);
@@ -145,6 +147,7 @@ app.get("/health", async (_req, res) => {
       walletAddress: wallet.address,
       walletEthBalance: ethers.formatEther(balance),
       network: await provider.getNetwork(),
+      databasePath: dbPath,
     });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
@@ -160,12 +163,35 @@ app.post("/quote", async (req, res) => {
     const parsed = quoteSchema.parse(req.body);
     const payload = await buildQuotePayload(parsed);
     const quote = await postTradeApi("/quote", payload);
+    await logTradeEvent({
+      action: "quote",
+      chain: parsed.chain || String(payload.tokenInChainId),
+      tokenIn: parsed.tokenIn,
+      tokenOut: parsed.tokenOut,
+      amount: payload.amount,
+      amountHuman: parsed.amountHuman || null,
+      status: "success",
+      payload: parsed,
+      response: quote,
+    });
     res.json({ ok: true, quote, requestPayload: payload });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ ok: false, error: "Invalid request body", issues: error.issues });
     }
     const detail = error.response?.data || error.message;
+    await logTradeEvent({
+      action: "quote",
+      chain: req.body?.chain || (req.body?.chainId ? String(req.body.chainId) : null),
+      tokenIn: req.body?.tokenIn || null,
+      tokenOut: req.body?.tokenOut || null,
+      amount: req.body?.amount || null,
+      amountHuman: req.body?.amountHuman || null,
+      status: "failed",
+      error: typeof detail === "string" ? detail : JSON.stringify(detail),
+      payload: req.body,
+      response: detail,
+    });
     res.status(500).json({ ok: false, error: detail });
   }
 });
@@ -189,6 +215,18 @@ app.post("/trade", async (req, res) => {
     }
     const txRequest = swap.swap || swap.tx || swap.transaction || swap.swapTx || {};
     const tradeResult = await sendTxFromRequest(txRequest);
+    await logTradeEvent({
+      action: "trade",
+      chain: parsed.chain || String(quotePayload.tokenInChainId),
+      tokenIn: parsed.tokenIn,
+      tokenOut: parsed.tokenOut,
+      amount: quotePayload.amount,
+      amountHuman: parsed.amountHuman || null,
+      txHash: tradeResult.hash,
+      status: "success",
+      payload: parsed,
+      response: { approvals: approvalReceipts, trade: tradeResult },
+    });
     res.json({
       ok: true,
       walletAddress: getWalletOrThrow().address,
@@ -203,6 +241,18 @@ app.post("/trade", async (req, res) => {
       return res.status(400).json({ ok: false, error: "Invalid request body", issues: error.issues });
     }
     const detail = error.response?.data || error.message;
+    await logTradeEvent({
+      action: "trade",
+      chain: req.body?.chain || (req.body?.chainId ? String(req.body.chainId) : null),
+      tokenIn: req.body?.tokenIn || null,
+      tokenOut: req.body?.tokenOut || null,
+      amount: req.body?.amount || null,
+      amountHuman: req.body?.amountHuman || null,
+      status: "failed",
+      error: typeof detail === "string" ? detail : JSON.stringify(detail),
+      payload: req.body,
+      response: detail,
+    });
     res.status(500).json({ ok: false, error: detail });
   }
 });
@@ -231,22 +281,70 @@ app.post("/strategy/dca", async (req, res) => {
         await new Promise((resolve) => setTimeout(resolve, intervalMs));
       }
     }
+    await logTradeEvent({
+      action: "strategy_dca",
+      chain: parsed.chain || null,
+      tokenIn: parsed.tokenIn,
+      tokenOut: parsed.tokenOut,
+      amount: parsed.amount || null,
+      amountHuman: parsed.amountHuman || null,
+      txHash: results[results.length - 1]?.txHash || null,
+      status: "success",
+      payload: { ...parsed, runs, intervalMs },
+      response: results,
+    });
     res.json({ ok: true, walletAddress: getWalletOrThrow().address, runs, results });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ ok: false, error: "Invalid request body", issues: error.issues });
     }
     const detail = error.response?.data || error.message;
+    await logTradeEvent({
+      action: "strategy_dca",
+      chain: req.body?.chain || (req.body?.chainId ? String(req.body.chainId) : null),
+      tokenIn: req.body?.tokenIn || null,
+      tokenOut: req.body?.tokenOut || null,
+      amount: req.body?.amount || null,
+      amountHuman: req.body?.amountHuman || null,
+      status: "failed",
+      error: typeof detail === "string" ? detail : JSON.stringify(detail),
+      payload: req.body,
+      response: detail,
+    });
     res.status(500).json({ ok: false, error: detail });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Uniswap trading agent running on http://localhost:${PORT}`);
-  if (wallet) {
-    console.log(`Trading wallet: ${wallet.address}`);
-    console.log(`Default chain preset: ${CHAIN_PRESET}`);
-  } else {
-    console.log("Limited mode active (missing RPC_URL and/or WALLET_PRIVATE_KEY).");
+app.get("/history", async (req, res) => {
+  try {
+    const rows = await getTradeHistory(req.query.limit);
+    res.json({ ok: true, count: rows.length, rows });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
   }
 });
+
+async function startServer() {
+  await initDb();
+  if (require.main === module) {
+    app.listen(PORT, () => {
+      console.log(`Uniswap trading agent running on http://localhost:${PORT}`);
+      if (wallet) {
+        console.log(`Trading wallet: ${wallet.address}`);
+        console.log(`Default chain preset: ${CHAIN_PRESET}`);
+      } else {
+        console.log("Limited mode active (missing RPC_URL and/or WALLET_PRIVATE_KEY).");
+      }
+      console.log(`Database initialized: ${dbPath}`);
+    });
+  }
+}
+
+startServer().catch((error) => {
+  console.error("Failed to initialize server:", error);
+  if (require.main === module) {
+    process.exit(1);
+  }
+});
+
+module.exports = app;
